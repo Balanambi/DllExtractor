@@ -1,11 +1,12 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 
 class Program
 {
-    static void Main(string[] args)
+    static async Task Main(string[] args)
     {
         // Setup dependency injection
         var serviceProvider = new ServiceCollection()
@@ -20,8 +21,8 @@ class Program
 
         try
         {
-            var namespaceClasses = dllAnalyzer.GetNamespacesAndClasses(folderPath);
-            var dllDependencies = dllAnalyzer.GetDllDependencies(folderPath);
+            var namespaceClasses = await dllAnalyzer.GetNamespacesAndClassesAsync(folderPath);
+            var dllDependencies = await dllAnalyzer.GetDllDependenciesAsync(folderPath);
 
             // Display the namespaces and classes
             Logger.Info("Displaying namespaces and classes.");
