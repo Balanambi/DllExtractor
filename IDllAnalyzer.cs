@@ -1,8 +1,9 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 public interface IDllAnalyzer
 {
-    Hashtable GetNamespacesAndClasses(string folderPath);
-    Dictionary<string, List<string>> GetDllDependencies(string folderPath);
+    Task<Hashtable> GetNamespacesAndClassesAsync(string folderPath);
+    Task<Dictionary<string, List<string>>> GetDllDependenciesAsync(string folderPath);
 }
