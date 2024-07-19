@@ -3,123 +3,150 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Threading.Tasks;
 
 public class DllAnalyzer : IDllAnalyzer
 {
-    public Hashtable GetNamespacesAndClasses(string folderPath)
+    public async Task<Hashtable> GetNamespacesAndClassesAsync(string folderPath)
     {
         Hashtable namespaceClasses = new Hashtable();
 
         Logger.Info($"Scanning DLLs in folder: {folderPath}");
 
-        foreach (string dllPath in Directory.GetFiles(folderPath, "*.dll"))
+        var dllFiles = Directory.GetFiles(folderPath, "*.dll");
+        var tasks = new List<Task>();
+
+        foreach (string dllPath in dllFiles)
         {
-            Logger.Info($"Processing DLL: {dllPath}");
-            try
+            tasks.Add(Task.Run(async () =>
             {
-                var assembly = Assembly.ReflectionOnlyLoadFrom(dllPath);
-                LoadReferencedAssemblies(assembly, folderPath);
-
-                foreach (var type in assembly.GetTypes())
+                Logger.Info($"Processing DLL: {dllPath}");
+                try
                 {
-                    if (!namespaceClasses.ContainsKey(type.Namespace))
+                    var assembly = Assembly.ReflectionOnlyLoadFrom(dllPath);
+                    await LoadReferencedAssembliesAsync(assembly, folderPath);
+
+                    foreach (var type in assembly.GetTypes())
                     {
-                        namespaceClasses[type.Namespace] = new List<string>();
-                    }
+                        if (!namespaceClasses.ContainsKey(type.Namespace))
+                        {
+                            namespaceClasses[type.Namespace] = new List<string>();
+                        }
 
-                    ((List<string>)namespaceClasses[type.Namespace]).Add(type.Name);
+                        ((List<string>)namespaceClasses[type.Namespace]).Add(type.Name);
+                    }
                 }
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                Logger.Error($"Unable to load one or more of the requested types from {dllPath}.", ex);
-                foreach (var loaderException in ex.LoaderExceptions)
+                catch (ReflectionTypeLoadException ex)
                 {
-                    Logger.Error(loaderException.Message, loaderException);
+                    Logger.Error($"Unable to load one or more of the requested types from {dllPath}.", ex);
+                    foreach (var loaderException in ex.LoaderExceptions)
+                    {
+                        Logger.Error(loaderException.Message, loaderException);
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"An error occurred while processing {dllPath}.", ex);
-            }
+                catch (Exception ex)
+                {
+                    Logger.Error($"An error occurred while processing {dllPath}.", ex);
+                }
+            }));
         }
+
+        await Task.WhenAll(tasks);
 
         Logger.Info("Completed scanning namespaces and classes.");
         return namespaceClasses;
     }
 
-    public Dictionary<string, List<string>> GetDllDependencies(string folderPath)
+    public async Task<Dictionary<string, List<string>>> GetDllDependenciesAsync(string folderPath)
     {
         Dictionary<string, List<string>> dllDependencies = new Dictionary<string, List<string>>();
 
         Logger.Info($"Scanning DLL dependencies in folder: {folderPath}");
 
-        foreach (string dllPath in Directory.GetFiles(folderPath, "*.dll"))
+        var dllFiles = Directory.GetFiles(folderPath, "*.dll");
+        var tasks = new List<Task>();
+
+        foreach (string dllPath in dllFiles)
         {
-            Logger.Info($"Processing DLL: {dllPath}");
-            try
+            tasks.Add(Task.Run(async () =>
             {
-                var assembly = Assembly.ReflectionOnlyLoadFrom(dllPath);
-                LoadReferencedAssemblies(assembly, folderPath);
-
-                List<string> dependencies = new List<string>();
-                foreach (var referencedAssembly in assembly.GetReferencedAssemblies())
+                Logger.Info($"Processing DLL: {dllPath}");
+                try
                 {
-                    dependencies.Add(referencedAssembly.FullName);
-                }
+                    var assembly = Assembly.ReflectionOnlyLoadFrom(dllPath);
+                    await LoadReferencedAssembliesAsync(assembly, folderPath);
 
-                dllDependencies[Path.GetFileName(dllPath)] = dependencies;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"An error occurred while processing {dllPath}.", ex);
-            }
+                    List<string> dependencies = new List<string>();
+                    foreach (var referencedAssembly in assembly.GetReferencedAssemblies())
+                    {
+                        dependencies.Add(referencedAssembly.FullName);
+                    }
+
+                    dllDependencies[Path.GetFileName(dllPath)] = dependencies;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"An error occurred while processing {dllPath}.", ex);
+                }
+            }));
         }
+
+        await Task.WhenAll(tasks);
 
         Logger.Info("Completed scanning DLL dependencies.");
         return dllDependencies;
     }
 
-    private void LoadReferencedAssemblies(Assembly assembly, string baseDirectory)
+    private async Task LoadReferencedAssembliesAsync(Assembly assembly, string baseDirectory)
     {
+        var tasks = new List<Task>();
+
         foreach (var referencedAssemblyName in assembly.GetReferencedAssemblies())
         {
-            try
+            tasks.Add(Task.Run(async () =>
             {
-                Assembly.ReflectionOnlyLoad(referencedAssemblyName.FullName);
-            }
-            catch (FileNotFoundException)
-            {
-                Logger.Error($"Referenced assembly {referencedAssemblyName.FullName} could not be found. Attempting to locate it.");
+                try
+                {
+                    Assembly.ReflectionOnlyLoad(referencedAssemblyName.FullName);
+                }
+                catch (FileNotFoundException)
+                {
+                    Logger.Error($"Referenced assembly {referencedAssemblyName.FullName} could not be found. Attempting to locate it.");
 
-                // Try to find the assembly in the base directory and subdirectories
-                string assemblyPath = FindAssemblyInBaseDirectory(baseDirectory, referencedAssemblyName.Name);
-                if (assemblyPath != null)
-                {
-                    try
+                    // Try to find the assembly in the base directory and subdirectories
+                    string assemblyPath = await FindAssemblyInBaseDirectoryAsync(baseDirectory, referencedAssemblyName.Name);
+                    if (assemblyPath != null)
                     {
-                        var loadedAssembly = Assembly.ReflectionOnlyLoadFrom(assemblyPath);
-                        LoadReferencedAssemblies(loadedAssembly, baseDirectory); // Recursively load dependencies
+                        try
+                        {
+                            var loadedAssembly = Assembly.ReflectionOnlyLoadFrom(assemblyPath);
+                            await LoadReferencedAssembliesAsync(loadedAssembly, baseDirectory); // Recursively load dependencies
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Error($"Failed to load assembly from path: {assemblyPath}.", ex);
+                        }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        Logger.Error($"Failed to load assembly from path: {assemblyPath}.", ex);
+                        Logger.Error($"Assembly {referencedAssemblyName.Name} could not be found in base directory {baseDirectory}.");
                     }
                 }
-                else
-                {
-                    Logger.Error($"Assembly {referencedAssemblyName.Name} could not be found in base directory {baseDirectory}.");
-                }
-            }
+            }));
         }
+
+        await Task.WhenAll(tasks);
     }
 
-    private string FindAssemblyInBaseDirectory(string baseDirectory, string assemblyName)
+    private async Task<string> FindAssemblyInBaseDirectoryAsync(string baseDirectory, string assemblyName)
     {
-        foreach (var file in Directory.GetFiles(baseDirectory, $"{assemblyName}.dll", SearchOption.AllDirectories))
+        return await Task.Run(() =>
         {
-            return file;
-        }
-        return null;
+            foreach (var file in Directory.GetFiles(baseDirectory, $"{assemblyName}.dll", SearchOption.AllDirectories))
+            {
+                return file;
+            }
+            return null;
+        });
     }
 }
