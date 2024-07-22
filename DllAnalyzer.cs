@@ -5,7 +5,7 @@ using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
 
-public class DllAnalyzer : IDllAnalyzer
+public class DllAnalyzer : MarshalByRefObject
 {
     public async Task<Hashtable> GetNamespacesAndClassesAsync(string folderPath)
     {
@@ -13,36 +13,24 @@ public class DllAnalyzer : IDllAnalyzer
 
         Logger.Info($"Scanning DLLs in folder: {folderPath}");
 
-        var dllFiles = Directory.GetFiles(folderPath, "*.dll");
         var tasks = new List<Task>();
 
-        foreach (string dllPath in dllFiles)
+        foreach (string dllPath in Directory.GetFiles(folderPath, "*.dll"))
         {
             tasks.Add(Task.Run(async () =>
             {
                 Logger.Info($"Processing DLL: {dllPath}");
                 try
                 {
-                    var assembly = Assembly.ReflectionOnlyLoadFrom(dllPath);
-                    await LoadReferencedAssembliesAsync(assembly, folderPath);
-
-                    foreach (var type in assembly.GetTypes())
+                    var assembly = await LoadAssemblyAsync(dllPath);
+                    if (assembly != null)
                     {
-                        if (!namespaceClasses.ContainsKey(type.Namespace))
-                        {
-                            namespaceClasses[type.Namespace] = new List<string>();
-                        }
-
-                        ((List<string>)namespaceClasses[type.Namespace]).Add(type.Name);
+                        await ProcessAssemblyTypesAsync(assembly, namespaceClasses);
                     }
                 }
                 catch (ReflectionTypeLoadException ex)
                 {
-                    Logger.Error($"Unable to load one or more of the requested types from {dllPath}.", ex);
-                    foreach (var loaderException in ex.LoaderExceptions)
-                    {
-                        Logger.Error(loaderException.Message, loaderException);
-                    }
+                    await HandleReflectionTypeLoadExceptionAsync(ex, dllPath, namespaceClasses);
                 }
                 catch (Exception ex)
                 {
@@ -63,26 +51,26 @@ public class DllAnalyzer : IDllAnalyzer
 
         Logger.Info($"Scanning DLL dependencies in folder: {folderPath}");
 
-        var dllFiles = Directory.GetFiles(folderPath, "*.dll");
         var tasks = new List<Task>();
 
-        foreach (string dllPath in dllFiles)
+        foreach (string dllPath in Directory.GetFiles(folderPath, "*.dll"))
         {
             tasks.Add(Task.Run(async () =>
             {
                 Logger.Info($"Processing DLL: {dllPath}");
                 try
                 {
-                    var assembly = Assembly.ReflectionOnlyLoadFrom(dllPath);
-                    await LoadReferencedAssembliesAsync(assembly, folderPath);
-
-                    List<string> dependencies = new List<string>();
-                    foreach (var referencedAssembly in assembly.GetReferencedAssemblies())
+                    var assembly = await LoadAssemblyAsync(dllPath);
+                    if (assembly != null)
                     {
-                        dependencies.Add(referencedAssembly.FullName);
-                    }
+                        List<string> dependencies = new List<string>();
+                        foreach (var referencedAssembly in assembly.GetReferencedAssemblies())
+                        {
+                            dependencies.Add(referencedAssembly.FullName);
+                        }
 
-                    dllDependencies[Path.GetFileName(dllPath)] = dependencies;
+                        dllDependencies[Path.GetFileName(dllPath)] = dependencies;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -97,56 +85,98 @@ public class DllAnalyzer : IDllAnalyzer
         return dllDependencies;
     }
 
-    private async Task LoadReferencedAssembliesAsync(Assembly assembly, string baseDirectory)
-    {
-        var tasks = new List<Task>();
-
-        foreach (var referencedAssemblyName in assembly.GetReferencedAssemblies())
-        {
-            tasks.Add(Task.Run(async () =>
-            {
-                try
-                {
-                    Assembly.ReflectionOnlyLoad(referencedAssemblyName.FullName);
-                }
-                catch (FileNotFoundException)
-                {
-                    Logger.Error($"Referenced assembly {referencedAssemblyName.FullName} could not be found. Attempting to locate it.");
-
-                    // Try to find the assembly in the base directory and subdirectories
-                    string assemblyPath = await FindAssemblyInBaseDirectoryAsync(baseDirectory, referencedAssemblyName.Name);
-                    if (assemblyPath != null)
-                    {
-                        try
-                        {
-                            var loadedAssembly = Assembly.ReflectionOnlyLoadFrom(assemblyPath);
-                            await LoadReferencedAssembliesAsync(loadedAssembly, baseDirectory); // Recursively load dependencies
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.Error($"Failed to load assembly from path: {assemblyPath}.", ex);
-                        }
-                    }
-                    else
-                    {
-                        Logger.Error($"Assembly {referencedAssemblyName.Name} could not be found in base directory {baseDirectory}.");
-                    }
-                }
-            }));
-        }
-
-        await Task.WhenAll(tasks);
-    }
-
-    private async Task<string> FindAssemblyInBaseDirectoryAsync(string baseDirectory, string assemblyName)
+    private async Task<Assembly> LoadAssemblyAsync(string dllPath)
     {
         return await Task.Run(() =>
         {
-            foreach (var file in Directory.GetFiles(baseDirectory, $"{assemblyName}.dll", SearchOption.AllDirectories))
+            try
+            {
+                return Assembly.LoadFrom(dllPath);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Failed to load assembly {dllPath} using LoadFrom. Attempting to load using ReflectionOnlyLoad. Exception: {ex.Message}");
+                try
+                {
+                    return Assembly.ReflectionOnlyLoadFrom(dllPath);
+                }
+                catch (Exception reflectionEx)
+                {
+                    Logger.Error($"Failed to load assembly {dllPath} using ReflectionOnlyLoadFrom. Exception: {reflectionEx.Message}");
+                    return null;
+                }
+            }
+        });
+    }
+
+    private async Task ProcessAssemblyTypesAsync(Assembly assembly, Hashtable namespaceClasses)
+    {
+        await Task.Run(() =>
+        {
+            foreach (var type in assembly.GetTypes())
+            {
+                if (!namespaceClasses.ContainsKey(type.Namespace))
+                {
+                    namespaceClasses[type.Namespace] = new List<string>();
+                }
+
+                ((List<string>)namespaceClasses[type.Namespace]).Add(type.Name);
+            }
+        });
+    }
+
+    private async Task HandleReflectionTypeLoadExceptionAsync(ReflectionTypeLoadException ex, string dllPath, Hashtable namespaceClasses)
+    {
+        Logger.Error($"Unable to load one or more of the requested types from {dllPath}.", ex);
+        foreach (var loaderException in ex.LoaderExceptions)
+        {
+            Logger.Error(loaderException.Message, loaderException);
+            // Attempt to resolve missing assemblies or dependencies here
+            await TryResolveAndLoadMissingAssemblyAsync(loaderException as FileNotFoundException);
+        }
+
+        // Retry loading types from the assembly
+        try
+        {
+            var assembly = await LoadAssemblyAsync(dllPath);
+            if (assembly != null)
+            {
+                await ProcessAssemblyTypesAsync(assembly, namespaceClasses);
+            }
+        }
+        catch (Exception retryEx)
+        {
+            Logger.Error($"Retrying to load assembly {dllPath} failed.", retryEx);
+        }
+    }
+
+    private async Task TryResolveAndLoadMissingAssemblyAsync(FileNotFoundException fileNotFoundException)
+    {
+        if (fileNotFoundException != null)
+        {
+            var missingAssemblyName = new AssemblyName(fileNotFoundException.FileName);
+            Logger.Warn($"Attempting to resolve missing assembly: {missingAssemblyName.FullName}");
+
+            // Search and load the missing assembly
+            var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            var dllPath = FindAssemblyInBaseDirectory(missingAssemblyName.Name, baseDirectory);
+            if (!string.IsNullOrEmpty(dllPath))
+            {
+                await LoadAssemblyAsync(dllPath);
+            }
+        }
+    }
+
+    private string FindAssemblyInBaseDirectory(string assemblyName, string baseDirectory)
+    {
+        var files = Directory.GetFiles(baseDirectory, "*.dll", SearchOption.AllDirectories);
+        foreach (var file in files)
+        {
+            if (Path.GetFileNameWithoutExtension(file).Equals(assemblyName, StringComparison.OrdinalIgnoreCase))
             {
                 return file;
             }
-            return null;
-        });
+        }
+        return null;
     }
 }
