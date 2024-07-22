@@ -111,7 +111,7 @@ public class DllAnalyzer : MarshalByRefObject
 
     private async Task ProcessAssemblyTypesAsync(Assembly assembly, Hashtable namespaceClasses)
     {
-        await Task.Run(() =>
+        try
         {
             foreach (var type in assembly.GetTypes())
             {
@@ -122,7 +122,27 @@ public class DllAnalyzer : MarshalByRefObject
 
                 ((List<string>)namespaceClasses[type.Namespace]).Add(type.Name);
             }
-        });
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            Logger.Error("Error loading types from assembly.", ex);
+            foreach (var loaderException in ex.LoaderExceptions)
+            {
+                Logger.Error(loaderException.Message, loaderException);
+                await TryResolveAndLoadMissingAssemblyAsync(loaderException as FileNotFoundException);
+            }
+
+            // Retry loading types from the assembly
+            foreach (var type in assembly.GetTypes())
+            {
+                if (!namespaceClasses.ContainsKey(type.Namespace))
+                {
+                    namespaceClasses[type.Namespace] = new List<string>();
+                }
+
+                ((List<string>)namespaceClasses[type.Namespace]).Add(type.Name);
+            }
+        }
     }
 
     private async Task HandleReflectionTypeLoadExceptionAsync(ReflectionTypeLoadException ex, string dllPath, Hashtable namespaceClasses)
