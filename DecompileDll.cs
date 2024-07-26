@@ -27,14 +27,26 @@ namespace DecompileDll
 
             try
             {
-                var decompiler = new WholeProjectDecompiler();
-                decompiler.DecompileProject(dllPath, outputDir);
+                DecompileAssembly(dllPath, outputDir);
                 Console.WriteLine($"Decompilation complete. Files have been saved to {outputDir}");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"An error occurred: {ex.Message}");
             }
+        }
+
+        static void DecompileAssembly(string assemblyPath, string outputDir)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(assemblyPath);
+            var outputFilePath = Path.Combine(outputDir, fileName + ".cs");
+
+            var module = new PEFile(assemblyPath);
+            var resolver = new UniversalAssemblyResolver(assemblyPath, true, module.Reader.DetectTargetFrameworkId());
+            var decompiler = new CSharpDecompiler(assemblyPath, resolver, new DecompilerSettings());
+
+            var code = decompiler.DecompileWholeModuleAsString();
+            File.WriteAllText(outputFilePath, code);
         }
     }
 }
