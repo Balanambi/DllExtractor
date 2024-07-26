@@ -42,7 +42,10 @@ namespace DecompileDll
             var outputFilePath = Path.Combine(outputDir, fileName + ".cs");
 
             var module = new PEFile(assemblyPath);
-            var resolver = new UniversalAssemblyResolver(assemblyPath, true, module.Reader.DetectTargetFrameworkId());
+            var resolver = new UniversalAssemblyResolver(assemblyPath, true, ".NETFramework,Version=v4.7.2"); // Specify the target framework
+            resolver.AddSearchDirectory(Path.GetDirectoryName(assemblyPath)); // Add the directory of the DLL
+            resolver.AddSearchDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles) + @"\dotnet\shared\Microsoft.NETCore.App\4.7.2"); // Add .NET framework directory
+
             var decompiler = new CSharpDecompiler(assemblyPath, resolver, new DecompilerSettings());
 
             var code = decompiler.DecompileWholeModuleAsString();
