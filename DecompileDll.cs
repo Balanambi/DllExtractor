@@ -44,12 +44,33 @@ namespace DecompileDll
             var module = new PEFile(assemblyPath);
             var resolver = new UniversalAssemblyResolver(assemblyPath, true, ".NETFramework,Version=v4.7.2"); // Specify the target framework
             resolver.AddSearchDirectory(Path.GetDirectoryName(assemblyPath)); // Add the directory of the DLL
-            resolver.AddSearchDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles) + @"\dotnet\shared\Microsoft.NETCore.App\4.7.2"); // Add .NET framework directory
+            //resolver.AddSearchDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles) + @"\dotnet\shared\Microsoft.NETCore.App\4.7.2"); // Add .NET framework directory
+            AddFrameworkSearchDirectories(resolver);
 
             var decompiler = new CSharpDecompiler(assemblyPath, resolver, new DecompilerSettings());
 
             var code = decompiler.DecompileWholeModuleAsString();
             File.WriteAllText(outputFilePath, code);
+        }
+        static void AddFrameworkSearchDirectories(UniversalAssemblyResolver resolver)
+        {
+            // Adding .NET Framework installation directories
+            var frameworkDirectories = new[]
+            {
+                @"C:\Windows\Microsoft.NET\assembly\GAC_MSIL",
+                @"C:\Windows\Microsoft.NET\assembly\GAC_32",
+                @"C:\Windows\Microsoft.NET\assembly\GAC_64",
+                @"C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2",
+                @"C:\Program Files\dotnet\shared\Microsoft.NETCore.App\2.2.0", // Adjust based on your system
+            };
+
+            foreach (var dir in frameworkDirectories)
+            {
+                if (Directory.Exists(dir))
+                {
+                    resolver.AddSearchDirectory(dir);
+                }
+            }
         }
     }
 }
