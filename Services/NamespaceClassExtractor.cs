@@ -96,7 +96,24 @@ namespace ProjectNamespaceClassExtractor.Services
 
             foreach (var attribute in customAttributes)
             {
-                var attributeName = metadataReader.GetString(metadataReader.GetTypeReference((TypeReferenceHandle)attribute.Constructor).Name);
+                var ctorHandle = attribute.Constructor;
+                StringHandle nameHandle = default;
+
+                switch (ctorHandle.Kind)
+                {
+                    case HandleKind.MethodDefinition:
+                        var methodDef = metadataReader.GetMethodDefinition((MethodDefinitionHandle)ctorHandle);
+                        nameHandle = methodDef.Name;
+                        break;
+                    case HandleKind.MemberReference:
+                        var memberRef = metadataReader.GetMemberReference((MemberReferenceHandle)ctorHandle);
+                        nameHandle = memberRef.Name;
+                        break;
+                    default:
+                        continue;
+                }
+
+                var attributeName = metadataReader.GetString(nameHandle);
                 if (attributeName == "TargetFrameworkAttribute")
                 {
                     var value = metadataReader.GetBlobReader(attribute.Value).ReadSerializedString();
