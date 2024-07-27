@@ -5,6 +5,7 @@ using System.IO;
 using ICSharpCode.Decompiler;
 using ICSharpCode.Decompiler.CSharp;
 using ICSharpCode.Decompiler.Metadata;
+using ICSharpCode.Decompiler.TypeSystem;
 using ProjectNamespaceClassExtractor.Interfaces;
 using ProjectNamespaceClassExtractor.Logging;
 
@@ -19,7 +20,7 @@ namespace ProjectNamespaceClassExtractor.Services
             try
             {
                 var module = new PEFile(assemblyPath);
-                var resolver = new UniversalAssemblyResolver(assemblyPath, true, ".NETFramework,Version=v4.7.2");
+                var resolver = new UniversalAssemblyResolver(assemblyPath, true, GetTargetFrameworkId(assemblyPath));
                 resolver.AddSearchDirectory(Path.GetDirectoryName(assemblyPath));
                 AddFrameworkSearchDirectories(resolver);
 
@@ -28,7 +29,7 @@ namespace ProjectNamespaceClassExtractor.Services
 
                 foreach (var type in typeSystem.MainModule.TypeDefinitions)
                 {
-                    if (!type.IsPublic)
+                    if (type.Accessibility != Accessibility.Public)
                         continue;
 
                     var namespaceName = type.Namespace;
@@ -55,14 +56,25 @@ namespace ProjectNamespaceClassExtractor.Services
 
         private void AddFrameworkSearchDirectories(UniversalAssemblyResolver resolver)
         {
-            var frameworkDirectories = new[]
+            var frameworkDirectories = new List<string>
             {
                 @"C:\Windows\Microsoft.NET\assembly\GAC_MSIL",
                 @"C:\Windows\Microsoft.NET\assembly\GAC_32",
                 @"C:\Windows\Microsoft.NET\assembly\GAC_64",
-                @"C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2",
-                @"C:\Program Files\dotnet\shared\Microsoft.NETCore.App\2.2.0",
+                @"C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework",
+                @"C:\Program Files\dotnet\shared"
             };
+
+            // Add .NET Core directories dynamically
+            var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var netCoreDir = Path.Combine(programFiles, "dotnet", "shared");
+            if (Directory.Exists(netCoreDir))
+            {
+                foreach (var dir in Directory.GetDirectories(netCoreDir))
+                {
+                    frameworkDirectories.Add(dir);
+                }
+            }
 
             foreach (var dir in frameworkDirectories)
             {
@@ -71,6 +83,33 @@ namespace ProjectNamespaceClassExtractor.Services
                     resolver.AddSearchDirectory(dir);
                 }
             }
+        }
+
+        private string GetTargetFrameworkId(string assemblyPath)
+        {
+            var module = new PEFile(assemblyPath);
+            if (module.Reader.PEHeaders.CorHeader.MetadataVersion.StartsWith("v4.0"))
+            {
+                // For .NET Framework assemblies, determine the exact version
+                var resolver = new UniversalAssemblyResolver(assemblyPath, true, ".NETFramework,Version=v4.7.2");
+                resolver.AddSearchDirectory(Path.GetDirectoryName(assemblyPath));
+                var decompiler = new CSharpDecompiler(assemblyPath, resolver, new DecompilerSettings());
+                var typeSystem = decompiler.TypeSystem;
+                var frameworkType = typeSystem.FindType(new FullTypeName("System.Object")).GetDefinition();
+                if (frameworkType != null)
+                {
+                    var assembly = frameworkType.ParentModule.PEFile;
+                    var targetFrameworkAttribute = assembly.CustomAttributes.FirstOrDefault(a => a.AttributeType.Name == "TargetFrameworkAttribute");
+                    if (targetFrameworkAttribute != null)
+                    {
+                        var targetFramework = (string)targetFrameworkAttribute.FixedArguments[0].Value;
+                        return targetFramework;
+                    }
+                }
+            }
+
+            // Default to .NET Core
+            return ".NETCoreApp,Version=v2.0";
         }
     }
 }
