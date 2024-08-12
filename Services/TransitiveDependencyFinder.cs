@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
+using ICSharpCode.Decompiler;
+using ICSharpCode.Decompiler.Metadata;
+using ICSharpCode.Decompiler.TypeSystem;
 
 namespace TransitiveDependencyFinder
 {
@@ -16,8 +18,13 @@ namespace TransitiveDependencyFinder
 
             try
             {
-                var rootAssembly = Assembly.LoadFrom(assemblyPath);
-                GetDependenciesRecursive(rootAssembly, dependencies);
+                var resolver = new UniversalAssemblyResolver(assemblyPath, true, null);
+                var rootAssembly = resolver.Resolve(Path.GetFileName(assemblyPath));
+
+                if (rootAssembly != null)
+                {
+                    GetDependenciesRecursive(rootAssembly, dependencies, resolver);
+                }
             }
             catch (Exception ex)
             {
@@ -27,7 +34,7 @@ namespace TransitiveDependencyFinder
             return dependencies;
         }
 
-        private void GetDependenciesRecursive(Assembly assembly, Dictionary<string, List<string>> dependencies)
+        private void GetDependenciesRecursive(PEFile assembly, Dictionary<string, List<string>> dependencies, UniversalAssemblyResolver resolver)
         {
             if (_visitedAssemblies.Contains(assembly.FullName))
             {
@@ -36,25 +43,25 @@ namespace TransitiveDependencyFinder
 
             _visitedAssemblies.Add(assembly.FullName);
 
-            var assemblyPath = assembly.Location;
+            var assemblyPath = assembly.FileName;
             if (!dependencies.ContainsKey(assemblyPath))
             {
                 dependencies[assemblyPath] = new List<string>();
             }
 
-            foreach (var reference in assembly.GetReferencedAssemblies())
+            foreach (var reference in assembly.AssemblyReferences)
             {
                 try
                 {
-                    var referencedAssembly = Assembly.Load(reference);
-                    var referencedAssemblyPath = referencedAssembly.Location;
+                    var referencedAssembly = resolver.Resolve(reference);
+                    var referencedAssemblyPath = referencedAssembly.FileName;
 
                     if (!dependencies[assemblyPath].Contains(referencedAssemblyPath))
                     {
                         dependencies[assemblyPath].Add(referencedAssemblyPath);
                     }
 
-                    GetDependenciesRecursive(referencedAssembly, dependencies);
+                    GetDependenciesRecursive(referencedAssembly, dependencies, resolver);
                 }
                 catch (Exception ex)
                 {
