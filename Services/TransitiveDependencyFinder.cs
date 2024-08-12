@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using ICSharpCode.Decompiler;
 using ICSharpCode.Decompiler.Metadata;
-using ICSharpCode.Decompiler.TypeSystem;
 
 namespace TransitiveDependencyFinder
 {
@@ -12,9 +11,9 @@ namespace TransitiveDependencyFinder
     {
         private readonly HashSet<string> _visitedAssemblies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        public Dictionary<string, List<string>> GetTransitiveDependencies(string assemblyPath)
+        public DependencyNode GetTransitiveDependencies(string assemblyPath)
         {
-            var dependencies = new Dictionary<string, List<string>>();
+            DependencyNode rootNode = null;
 
             try
             {
@@ -23,7 +22,8 @@ namespace TransitiveDependencyFinder
 
                 if (rootAssembly != null)
                 {
-                    GetDependenciesRecursive(rootAssembly, dependencies, resolver);
+                    rootNode = new DependencyNode(assemblyPath);
+                    GetDependenciesRecursive(rootAssembly, rootNode, resolver);
                 }
             }
             catch (Exception ex)
@@ -31,10 +31,10 @@ namespace TransitiveDependencyFinder
                 Console.WriteLine($"Error loading assembly: {ex.Message}");
             }
 
-            return dependencies;
+            return rootNode;
         }
 
-        private void GetDependenciesRecursive(PEFile assembly, Dictionary<string, List<string>> dependencies, UniversalAssemblyResolver resolver)
+        private void GetDependenciesRecursive(PEFile assembly, DependencyNode currentNode, UniversalAssemblyResolver resolver)
         {
             if (_visitedAssemblies.Contains(assembly.FullName))
             {
@@ -43,12 +43,6 @@ namespace TransitiveDependencyFinder
 
             _visitedAssemblies.Add(assembly.FullName);
 
-            var assemblyPath = assembly.FileName;
-            if (!dependencies.ContainsKey(assemblyPath))
-            {
-                dependencies[assemblyPath] = new List<string>();
-            }
-
             foreach (var reference in assembly.AssemblyReferences)
             {
                 try
@@ -56,12 +50,10 @@ namespace TransitiveDependencyFinder
                     var referencedAssembly = resolver.Resolve(reference);
                     var referencedAssemblyPath = referencedAssembly.FileName;
 
-                    if (!dependencies[assemblyPath].Contains(referencedAssemblyPath))
-                    {
-                        dependencies[assemblyPath].Add(referencedAssemblyPath);
-                    }
+                    var childNode = new DependencyNode(referencedAssemblyPath);
+                    currentNode.Dependencies.Add(childNode);
 
-                    GetDependenciesRecursive(referencedAssembly, dependencies, resolver);
+                    GetDependenciesRecursive(referencedAssembly, childNode, resolver);
                 }
                 catch (Exception ex)
                 {
@@ -72,17 +64,30 @@ namespace TransitiveDependencyFinder
 
         public bool IsDllInTransitiveDependencies(string assemblyPath, string dllName)
         {
-            var dependencies = GetTransitiveDependencies(assemblyPath);
-            foreach (var deps in dependencies.Values)
+            var rootNode = GetTransitiveDependencies(assemblyPath);
+            return SearchNode(rootNode, dllName);
+        }
+
+        private bool SearchNode(DependencyNode node, string dllName)
+        {
+            if (node == null)
             {
-                foreach (var dep in deps)
+                return false;
+            }
+
+            if (Path.GetFileName(node.AssemblyPath).Equals(dllName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            foreach (var child in node.Dependencies)
+            {
+                if (SearchNode(child, dllName))
                 {
-                    if (Path.GetFileName(dep).Equals(dllName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
+                    return true;
                 }
             }
+
             return false;
         }
     }
