@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using ICSharpCode.Decompiler;
 using ICSharpCode.Decompiler.Metadata;
 
@@ -10,6 +9,7 @@ namespace TransitiveDependencyFinder
     public class DependencyService : IDependencyService
     {
         private readonly HashSet<string> _visitedAssemblies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DependencyNode> _allNodes = new Dictionary<string, DependencyNode>(StringComparer.OrdinalIgnoreCase);
 
         public DependencyNode GetTransitiveDependencies(string assemblyPath)
         {
@@ -22,7 +22,7 @@ namespace TransitiveDependencyFinder
 
                 if (rootAssembly != null)
                 {
-                    rootNode = new DependencyNode(assemblyPath);
+                    rootNode = GetOrCreateNode(assemblyPath);
                     GetDependenciesRecursive(rootAssembly, rootNode, resolver);
                 }
             }
@@ -50,7 +50,7 @@ namespace TransitiveDependencyFinder
                     var referencedAssembly = resolver.Resolve(reference);
                     var referencedAssemblyPath = referencedAssembly.FileName;
 
-                    var childNode = new DependencyNode(referencedAssemblyPath);
+                    var childNode = GetOrCreateNode(referencedAssemblyPath);
                     currentNode.Dependencies.Add(childNode);
 
                     GetDependenciesRecursive(referencedAssembly, childNode, resolver);
@@ -60,6 +60,16 @@ namespace TransitiveDependencyFinder
                     Console.WriteLine($"Error loading referenced assembly: {reference.FullName}. Exception: {ex.Message}");
                 }
             }
+        }
+
+        private DependencyNode GetOrCreateNode(string assemblyPath)
+        {
+            if (!_allNodes.TryGetValue(assemblyPath, out var node))
+            {
+                node = new DependencyNode(assemblyPath);
+                _allNodes[assemblyPath] = node;
+            }
+            return node;
         }
 
         public bool IsDllInTransitiveDependencies(string assemblyPath, string dllName)
@@ -89,17 +99,6 @@ namespace TransitiveDependencyFinder
             }
 
             return false;
-        }
-        static void PrintDependencies(DependencyNode node, int level)
-        {
-            if (node == null) return;
-
-            Console.WriteLine(new string(' ', level * 2) + node.AssemblyPath);
-
-            foreach (var child in node.Dependencies)
-            {
-                PrintDependencies(child, level + 1);
-            }
         }
     }
 }
