@@ -90,5 +90,16 @@ namespace TransitiveDependencyFinder
 
             return false;
         }
+        static void PrintDependencies(DependencyNode node, int level)
+        {
+            if (node == null) return;
+
+            Console.WriteLine(new string(' ', level * 2) + node.AssemblyPath);
+
+            foreach (var child in node.Dependencies)
+            {
+                PrintDependencies(child, level + 1);
+            }
+        }
     }
 }
