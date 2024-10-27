@@ -1,17 +1,28 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Set the target directory to the mapped NAS drive or UNC path
-set "targetDir=D:\"  REM Change this to your NAS path
+REM Check if the correct number of parameters is provided
+if "%~1"=="" (
+    echo Please provide the target directory as the first parameter.
+    exit /b
+)
+
+if "%~2"=="" (
+    echo Please provide the output file name as the second parameter.
+    exit /b
+)
+
+REM Set the target directory and output file from parameters
+set "targetDir=%~1"
+set "outputFile=%~2"
 
 REM Check if the directory exists
 if not exist "%targetDir%" (
-    echo Directory does not exist.
+    echo Directory does not exist: %targetDir%
     exit /b
 )
 
 REM Create/clear output file
-set "outputFile=folder_sizes.txt"
 echo "Folder Name","Size (GB)" > "%outputFile%"
 
 REM Count total directories
@@ -21,7 +32,7 @@ for /d %%D in ("%targetDir%\*") do (
 )
 
 if %totalDirs%==0 (
-    echo No directories found.
+    echo No directories found in %targetDir%.
     exit /b
 )
 
